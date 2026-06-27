@@ -52,6 +52,7 @@ def create_table():
     c.execute("""
         CREATE TABLE IF NOT EXISTS expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
             date TEXT,
             category TEXT,
             type TEXT,
@@ -91,27 +92,36 @@ def login_user(username, password):
     c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
     return c.fetchone()
 
-def add_transaction(date, category, t_type, amount, note):
+def add_transaction(username, date, category, t_type, amount, note):
     c.execute("""
-        INSERT INTO expenses (date, category, type, amount, note)
-        VALUES (?, ?, ?, ?, ?)
-    """, (date, category, t_type, amount, note))
+        INSERT INTO expenses (username, date, category, type, amount, note)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (username, date, category, t_type, amount, note))
     conn.commit()
 
-def get_all_transactions():
-    c.execute("SELECT * FROM expenses ORDER BY date DESC")
-    data = c.fetchall()
-    return data
+def get_all_transactions(username):
+    c.execute("""
+        SELECT * FROM expenses
+        WHERE username=?
+        ORDER BY date DESC
+    """, (username,))
+    return c.fetchall()
 
 def delete_transaction(t_id):
     c.execute("DELETE FROM expenses WHERE id=?", (t_id,))
     conn.commit()
 
-def get_balance():
-    c.execute("SELECT SUM(amount) FROM expenses WHERE type='Income'")
+def get_balance(username):
+    c.execute("""
+        SELECT SUM(amount) FROM expenses
+        WHERE username=? AND type='Income'
+    """, (username,))
     income = c.fetchone()[0] or 0
 
-    c.execute("SELECT SUM(amount) FROM expenses WHERE type='Expense'")
+    c.execute("""
+        SELECT SUM(amount) FROM expenses
+        WHERE username=? AND type='Expense'
+    """, (username,))
     expense = c.fetchone()[0] or 0
 
     return income, expense, income - expense
@@ -124,9 +134,6 @@ st.set_page_config(page_title="Expense Tracker", layout="wide")
 
 st.title("💰 Smart Expense Tracker")
 st.write("Track your income and expenses easily with charts & database storage.")
-
-menu = ["Dashboard", "Add Transaction", "View Transactions", "Analytics"]
-choice = st.sidebar.selectbox("Menu", menu)
 
 
 # =========================
@@ -188,7 +195,11 @@ if st.session_state.user is not None:
     # DASHBOARD
     # ========================
     if choice == "Dashboard":
-        income, expense, balance = get_balance()
+
+        user = st.session_state.user  # 👈 IMPORTANT
+
+        income, expense, balance = get_balance(user)
+        data = get_all_transactions(user)
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Income", f"₹ {income}")
@@ -197,10 +208,8 @@ if st.session_state.user is not None:
 
         st.subheader("Recent Transactions")
 
-        data = get_all_transactions()
-
         df = pd.DataFrame(data, columns=[
-            "ID", "Date", "Category", "Type", "Amount", "Note"
+            "ID", "Username", "Date", "Category", "Type", "Amount", "Note"
         ])
 
         st.dataframe(df.head(10))
@@ -255,6 +264,7 @@ if choice == "Add Transaction":
     if st.button("Add Transaction"):
         if amount > 0:
             add_transaction(
+                st.session_state.user,   # 👈 ADD THIS (IMPORTANT)
                 date.strftime("%Y-%m-%d"),
                 category,
                 t_type,
@@ -263,7 +273,7 @@ if choice == "Add Transaction":
             )
             st.success("Transaction Added Successfully ✅")
         else:
-            st.error("Please enter a valid amount")
+            st.error("Enter valid amount")
 
 # =========================
 # VIEW TRANSACTIONS PAGE
