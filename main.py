@@ -4,6 +4,9 @@ import pandas as pd
 from datetime import datetime
 import plotly.express as px
 
+if "user" not in st.session_state:
+    st.session_state.user = None
+
 st.markdown("""
 <style>
 h1, h2, h3 {
@@ -60,9 +63,33 @@ def create_table():
 
 create_table()
 
+
+def create_user_table():
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT
+        )
+    """)
+    conn.commit()
+
+create_user_table()
 # =========================
 # DATABASE FUNCTIONS
 # =========================
+
+def signup_user(username, password):
+    try:
+        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
+        conn.commit()
+        return True
+    except:
+        return False
+
+def login_user(username, password):
+    c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+    return c.fetchone()
 
 def add_transaction(date, category, t_type, amount, note):
     c.execute("""
@@ -101,36 +128,107 @@ st.write("Track your income and expenses easily with charts & database storage."
 menu = ["Dashboard", "Add Transaction", "View Transactions", "Analytics"]
 choice = st.sidebar.selectbox("Menu", menu)
 
+
+# =========================
+# LOGIN
+# =========================
+
+if st.session_state.user is None:
+
+    st.title("🔐 Login System")
+
+    menu = st.radio("Choose", ["Login", "Signup"])
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if menu == "Signup":
+        if st.button("Create Account"):
+            if signup_user(username, password):
+                st.success("Account created! Please login")
+            else:
+                st.error("Username already exists")
+
+    else:
+        if st.button("Login"):
+            user = login_user(username, password)
+            if user:
+                st.session_state.user = username
+                st.success("Login successful 🚀")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+
 # =========================
 # DASHBOARD (START)
 # =========================
 
-if choice == "Dashboard":
-    income, expense, balance = get_balance()
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Income", f"₹ {income}")
-    col2.metric("Total Expense", f"₹ {expense}")
-    col3.metric("Balance", f"₹ {balance}")
+if st.session_state.user is not None:
 
-    st.subheader("Recent Transactions")
-    data = get_all_transactions()
+    # ========================
+    # SIDEBAR USER INFO
+    # ========================
+    st.sidebar.write(f"👤 Logged in as: {st.session_state.user}")
 
-    df = pd.DataFrame(data, columns=[
-        "ID", "Date", "Category", "Type", "Amount", "Note"
-    ])
+    if st.sidebar.button("Logout"):
+        st.session_state.user = None
+        st.rerun()
 
-    st.dataframe(df.head(10))
-    
-    st.markdown("### 🔥 Quick Insights")
+    # ========================
+    # MENU (INSIDE LOGIN ONLY)
+    # ========================
+    choice = st.sidebar.selectbox(
+        "Menu",
+        ["Dashboard", "Add Transaction", "View Transactions", "Analytics"],
+        key="main_menu"
+    )
 
-    if income > expense:
-        st.success("You are saving money 💰")
-    else:
-        st.error("You are spending more than income ⚠️")
+    # ========================
+    # DASHBOARD
+    # ========================
+    if choice == "Dashboard":
+        income, expense, balance = get_balance()
 
-    savings_rate = (balance / income * 100) if income > 0 else 0
-    st.info(f"Savings Rate: {savings_rate:.2f}%")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Income", f"₹ {income}")
+        col2.metric("Total Expense", f"₹ {expense}")
+        col3.metric("Balance", f"₹ {balance}")
+
+        st.subheader("Recent Transactions")
+
+        data = get_all_transactions()
+
+        df = pd.DataFrame(data, columns=[
+            "ID", "Date", "Category", "Type", "Amount", "Note"
+        ])
+
+        st.dataframe(df.head(10))
+
+        st.markdown("### 🔥 Quick Insights")
+
+        if income > expense:
+            st.success("You are saving money 💰")
+        else:
+            st.error("You are spending more than income ⚠️")
+
+        savings_rate = (balance / income * 100) if income > 0 else 0
+        st.info(f"Savings Rate: {savings_rate:.2f}%")
+
+    # ========================
+    # OTHER PAGES
+    # ========================
+    elif choice == "Add Transaction":
+        st.subheader("Add Transaction Page")
+
+    elif choice == "View Transactions":
+        st.subheader("View Transactions Page")
+
+    elif choice == "Analytics":
+        st.subheader("Analytics Page")
+
+else:
+    st.warning("🔐 Please login to access the Expense Tracker")
     
 # =========================
 # ADD TRANSACTION PAGE
