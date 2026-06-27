@@ -4,51 +4,36 @@ import pandas as pd
 from datetime import datetime
 import plotly.express as px
 
+# =========================
+# SESSION STATE
+# =========================
 if "user" not in st.session_state:
     st.session_state.user = None
 
-st.markdown("""
-<style>
-h1, h2, h3 {
-    color: #00ffcc;
-}
-
-div[data-testid="metric-container"] {
-    background-color: #1c1f26;
-    border-radius: 12px;
-    padding: 15px;
-    box-shadow: 0px 0px 10px #000;
-}
-
-.stButton>button {
-    background-color: #00ffcc;
-    color: black;
-    border-radius: 8px;
-    padding: 8px 15px;
-    font-weight: bold;
-}
-
-.stSidebar {
-    background-color: #11151c;
-}
-</style>
-""", unsafe_allow_html=True)
-
+# =========================
+# PAGE CONFIG
+# =========================
 st.set_page_config(
     page_title="Smart Expense Tracker",
     page_icon="💰",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 # =========================
-# DATABASE SETUP
+# DATABASE
 # =========================
-
 conn = sqlite3.connect("expenses.db", check_same_thread=False)
 c = conn.cursor()
 
-def create_table():
+def create_tables():
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT
+        )
+    """)
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,94 +47,75 @@ def create_table():
     """)
     conn.commit()
 
-create_table()
+create_tables()
 
-
-def create_user_table():
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password TEXT
-        )
-    """)
-    conn.commit()
-
-create_user_table()
 # =========================
-# DATABASE FUNCTIONS
+# AUTH FUNCTIONS
 # =========================
-
 def signup_user(username, password):
     try:
-        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
+        c.execute("INSERT INTO users (username, password) VALUES (?,?)",
+                  (username, password))
         conn.commit()
         return True
     except:
         return False
 
 def login_user(username, password):
-    c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+    c.execute("SELECT * FROM users WHERE username=? AND password=?",
+              (username, password))
     return c.fetchone()
 
-def add_transaction(username, date, category, t_type, amount, note):
+# =========================
+# EXPENSE FUNCTIONS
+# =========================
+def add_transaction(user, date, category, t_type, amount, note):
     c.execute("""
         INSERT INTO expenses (username, date, category, type, amount, note)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (username, date, category, t_type, amount, note))
+    """, (user, date, category, t_type, amount, note))
     conn.commit()
 
-def get_all_transactions(username):
+def get_all_transactions(user):
     c.execute("""
         SELECT * FROM expenses
         WHERE username=?
         ORDER BY date DESC
-    """, (username,))
+    """, (user,))
     return c.fetchall()
 
 def delete_transaction(t_id):
     c.execute("DELETE FROM expenses WHERE id=?", (t_id,))
     conn.commit()
 
-def get_balance(username):
+def get_balance(user):
     c.execute("""
         SELECT SUM(amount) FROM expenses
         WHERE username=? AND type='Income'
-    """, (username,))
+    """, (user,))
     income = c.fetchone()[0] or 0
 
     c.execute("""
         SELECT SUM(amount) FROM expenses
         WHERE username=? AND type='Expense'
-    """, (username,))
+    """, (user,))
     expense = c.fetchone()[0] or 0
 
     return income, expense, income - expense
 
 # =========================
-# STREAMLIT UI SETUP
+# LOGIN SYSTEM
 # =========================
-
-st.set_page_config(page_title="Expense Tracker", layout="wide")
-
-st.title("💰 Smart Expense Tracker")
-st.write("Track your income and expenses easily with charts & database storage.")
-
-
-# =========================
-# LOGIN
-# =========================
-
 if st.session_state.user is None:
 
-    st.title("🔐 Login System")
+    st.title("🔐 Smart Expense Tracker Login")
 
-    menu = st.radio("Choose", ["Login", "Signup"])
+    mode = st.radio("Choose", ["Login", "Signup"])
 
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
-    if menu == "Signup":
+    if mode == "Signup":
         if st.button("Create Account"):
             if signup_user(username, password):
                 st.success("Account created! Please login")
@@ -167,43 +133,35 @@ if st.session_state.user is None:
                 st.error("Invalid credentials")
 
 # =========================
-# DASHBOARD (START)
+# MAIN APP (AFTER LOGIN)
 # =========================
+else:
 
+    user = st.session_state.user
 
-if st.session_state.user is not None:
-
-    # ========================
-    # SIDEBAR USER INFO
-    # ========================
-    st.sidebar.write(f"👤 Logged in as: {st.session_state.user}")
+    st.sidebar.write(f"👤 {user}")
 
     if st.sidebar.button("Logout"):
         st.session_state.user = None
         st.rerun()
 
-    # ========================
-    # MENU (INSIDE LOGIN ONLY)
-    # ========================
     choice = st.sidebar.selectbox(
         "Menu",
         ["Dashboard", "Add Transaction", "View Transactions", "Analytics"],
-        key="main_menu"
+        key="menu"
     )
 
-    # ========================
+    # =========================
     # DASHBOARD
-    # ========================
+    # =========================
     if choice == "Dashboard":
-
-        user = st.session_state.user  # 👈 IMPORTANT
 
         income, expense, balance = get_balance(user)
         data = get_all_transactions(user)
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Total Income", f"₹ {income}")
-        col2.metric("Total Expense", f"₹ {expense}")
+        col1.metric("Income", f"₹ {income}")
+        col2.metric("Expense", f"₹ {expense}")
         col3.metric("Balance", f"₹ {balance}")
 
         st.subheader("Recent Transactions")
@@ -212,9 +170,7 @@ if st.session_state.user is not None:
             "ID", "Username", "Date", "Category", "Type", "Amount", "Note"
         ])
 
-        st.dataframe(df.head(10))
-
-        st.markdown("### 🔥 Quick Insights")
+        st.dataframe(df.head(10), use_container_width=True)
 
         if income > expense:
             st.success("You are saving money 💰")
@@ -224,160 +180,99 @@ if st.session_state.user is not None:
         savings_rate = (balance / income * 100) if income > 0 else 0
         st.info(f"Savings Rate: {savings_rate:.2f}%")
 
-    # ========================
-    # OTHER PAGES
-    # ========================
+    # =========================
+    # ADD TRANSACTION
+    # =========================
     elif choice == "Add Transaction":
-        st.subheader("Add Transaction Page")
 
+        st.subheader("➕ Add Transaction")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            t_type = st.selectbox("Type", ["Income", "Expense"])
+            category = st.selectbox("Category", [
+                "Salary", "Food", "Travel", "Shopping",
+                "Bills", "Entertainment", "Medical", "Other"
+            ])
+
+        with col2:
+            amount = st.number_input("Amount", min_value=0.0)
+            date = st.date_input("Date", datetime.today())
+
+        note = st.text_input("Note")
+
+        if st.button("Save"):
+            if amount > 0:
+                add_transaction(
+                    user,
+                    date.strftime("%Y-%m-%d"),
+                    category,
+                    t_type,
+                    amount,
+                    note
+                )
+                st.success("Saved successfully ✅")
+
+    # =========================
+    # VIEW TRANSACTIONS
+    # =========================
     elif choice == "View Transactions":
-        st.subheader("View Transactions Page")
 
-    elif choice == "Analytics":
-        st.subheader("Analytics Page")
+        st.subheader("📋 Transactions")
 
-else:
-    st.warning("🔐 Please login to access the Expense Tracker")
-    
-# =========================
-# ADD TRANSACTION PAGE
-# =========================
+        data = get_all_transactions(user)
 
-if choice == "Add Transaction":
-    st.subheader("➕ Add New Transaction")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        t_type = st.selectbox("Type", ["Income", "Expense"])
-        category = st.selectbox("Category", [
-            "Salary", "Food", "Travel", "Shopping",
-            "Bills", "Entertainment", "Medical", "Other"
-        ])
-
-    with col2:
-        amount = st.number_input("Amount (₹)", min_value=0.0, format="%.2f")
-        date = st.date_input("Date", datetime.today())
-
-    note = st.text_input("Note (Optional)")
-
-    if st.button("Add Transaction"):
-        if amount > 0:
-            add_transaction(
-                st.session_state.user,   # 👈 ADD THIS (IMPORTANT)
-                date.strftime("%Y-%m-%d"),
-                category,
-                t_type,
-                amount,
-                note
-            )
-            st.success("Transaction Added Successfully ✅")
-        else:
-            st.error("Enter valid amount")
-
-# =========================
-# VIEW TRANSACTIONS PAGE
-# =========================
-
-if choice == "View Transactions":
-    st.subheader("📋 All Transactions")
-    
-    filter_type = st.selectbox("Filter", ["All", "Income", "Expense"])
-
-    if filter_type != "All":
-        df = df[df["Type"] == filter_type]
-
-    data = get_all_transactions()
-
-    if len(data) == 0:
-        st.info("No transactions found")
-    else:
         df = pd.DataFrame(data, columns=[
-            "ID", "Date", "Category", "Type", "Amount", "Note"
+            "ID", "Username", "Date", "Category", "Type", "Amount", "Note"
         ])
+
+        filter_type = st.selectbox("Filter", ["All", "Income", "Expense"])
+
+        if filter_type != "All":
+            df = df[df["Type"] == filter_type]
 
         st.dataframe(df, use_container_width=True)
 
-        st.subheader("🗑️ Delete Transaction")
-
-        delete_id = st.number_input("Enter Transaction ID to delete", min_value=1, step=1)
+        delete_id = st.number_input("Delete ID", min_value=1)
 
         if st.button("Delete"):
             delete_transaction(delete_id)
-            st.warning("Transaction Deleted Successfully ⚠️")
+            st.warning("Deleted")
 
-# =========================
-# ANALYTICS PAGE
-# =========================
+    # =========================
+    # ANALYTICS
+    # =========================
+    elif choice == "Analytics":
 
-if choice == "Analytics":
-    st.subheader("📊 Expense Analytics")
+        st.subheader("📊 Analytics")
 
-    data = get_all_transactions()
+        data = get_all_transactions(user)
 
-    if len(data) == 0:
-        st.info("No data available for analytics")
-    else:
-        df = pd.DataFrame(data, columns=[
-            "ID", "Date", "Category", "Type", "Amount", "Note"
-        ])
+        if len(data) == 0:
+            st.info("No data")
+        else:
+            df = pd.DataFrame(data, columns=[
+                "ID", "Username", "Date", "Category", "Type", "Amount", "Note"
+            ])
 
-        # =========================
-        # INCOME VS EXPENSE CHART
-        # =========================
+            income_df = df[df["Type"] == "Income"]
+            expense_df = df[df["Type"] == "Expense"]
 
-        income_df = df[df["Type"] == "Income"]
-        expense_df = df[df["Type"] == "Expense"]
+            fig1 = px.bar(
+                x=["Income", "Expense"],
+                y=[income_df["Amount"].sum(), expense_df["Amount"].sum()],
+                title="Income vs Expense"
+            )
+            st.plotly_chart(fig1, use_container_width=True)
 
-        total_income = income_df["Amount"].sum()
-        total_expense = expense_df["Amount"].sum()
+            cat_df = expense_df.groupby("Category")["Amount"].sum().reset_index()
 
-        fig1 = px.bar(
-            x=["Income", "Expense"],
-            y=[total_income, total_expense],
-            color=["Income", "Expense"],
-            title="Income vs Expense"
-        )
-        st.plotly_chart(fig1, use_container_width=True)
+            fig2 = px.pie(cat_df, names="Category", values="Amount")
+            st.plotly_chart(fig2, use_container_width=True)
 
-        # =========================
-        # CATEGORY WISE EXPENSE
-        # =========================
+            df["Date"] = pd.to_datetime(df["Date"])
+            daily = df.groupby("Date")["Amount"].sum().reset_index()
 
-        st.subheader("🥧 Category-wise Expense")
-
-        category_df = expense_df.groupby("Category")["Amount"].sum().reset_index()
-
-        fig2 = px.pie(
-            category_df,
-            names="Category",
-            values="Amount",
-            title="Expense by Category"
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-
-        # =========================
-        # DAILY TREND
-        # =========================
-
-        st.subheader("📈 Daily Spending Trend")
-
-        df["Date"] = pd.to_datetime(df["Date"])
-
-        daily_df = df.groupby("Date")["Amount"].sum().reset_index()
-
-        fig3 = px.line(
-            daily_df,
-            x="Date",
-            y="Amount",
-            markers=True,
-            title="Daily Transaction Trend"
-        )
-        st.plotly_chart(fig3, use_container_width=True)
-
-# =========================
-# FOOTER
-# =========================
-
-st.markdown("---")
-st.markdown("💡 Built with Python + Streamlit + SQLite")
+            fig3 = px.line(daily, x="Date", y="Amount", markers=True)
+            st.plotly_chart(fig3, use_container_width=True)
